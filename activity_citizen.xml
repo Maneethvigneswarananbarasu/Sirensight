@@ -1,0 +1,319 @@
+package com.example.sirensightmobile;
+
+import android.app.TimePickerDialog;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Color;
+import android.media.MediaPlayer;
+import android.media.RingtoneManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.*;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.firebase.database.*;
+
+import java.util.Calendar;
+import java.util.HashMap;
+
+public class PoliceActivity extends AppCompatActivity {
+
+    private LinearLayout layoutRegistration, layoutDashboard;
+    private EditText etBatch, etOfficerName;
+    private TextView etStartTime, etEndTime;
+    private Spinner spinnerJunction;
+    private Button btnStartDuty;
+
+    private TextView txtMyName, txtMyBatchJunction, txtJunctionTitle, txtJunctionBadge, txtJunctionDesc, txtActiveCount;
+    private LinearLayout cardJunctionStatus, layoutAmbulanceList;
+    private Button btnEndDuty;
+
+    private String startTime = "", endTime = "";
+    private String registeredJunction = "";
+    private String officerName = "";
+    private String batchNumber = "";
+    private boolean isOnDuty = false;
+    private boolean isEmergencyActive = false;
+
+    private DatabaseReference policeRef, statusRef, ambRef;
+
+    private final Handler vibrationHandler = new Handler(Looper.getMainLooper());
+    private Vibrator vibrator;
+    private MediaPlayer mediaPlayer;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_police);
+
+        vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        policeRef = FirebaseDatabase.getInstance().getReference("Police_Duty");
+        statusRef = FirebaseDatabase.getInstance().getReference("Junction_Status");
+        ambRef = FirebaseDatabase.getInstance().getReference("Active_Ambulance");
+
+        bindUI();
+        setupListeners();
+    }
+
+    private void bindUI() {
+        findViewById(R.id.btnBack).setOnClickListener(v -> goBackToMenu());
+
+        layoutRegistration = findViewById(R.id.layoutRegistration);
+        layoutDashboard = findViewById(R.id.layoutDashboard);
+
+        etBatch = findViewById(R.id.etBatch);
+        etOfficerName = findViewById(R.id.etOfficerName);
+        etStartTime = findViewById(R.id.etStartTime);
+        etEndTime = findViewById(R.id.etEndTime);
+        spinnerJunction = findViewById(R.id.spinnerJunction);
+        btnStartDuty = findViewById(R.id.btnStartDuty);
+
+        txtMyName = findViewById(R.id.txtMyName);
+        txtMyBatchJunction = findViewById(R.id.txtMyBatchJunction);
+        txtJunctionTitle = findViewById(R.id.txtJunctionTitle);
+        txtJunctionBadge = findViewById(R.id.txtJunctionBadge);
+        txtJunctionDesc = findViewById(R.id.txtJunctionDesc);
+        txtActiveCount = findViewById(R.id.txtActiveCount);
+
+        cardJunctionStatus = findViewById(R.id.cardJunctionStatus);
+        layoutAmbulanceList = findViewById(R.id.layoutAmbulanceList);
+        btnEndDuty = findViewById(R.id.btnEndDuty);
+
+        // 🔥 ADDED THE DEMO JUNCTION HERE:
+        String[] junctions = {"Gandhi Mandapam Junction", "Poonamallee Junction", "Guindy Signal", "T Nagar Main Road", "Velachery Junction", "Vadapalani Junction", "Adyar Signal"};
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, junctions);
+        spinnerJunction.setAdapter(adapter);
+
+        etStartTime.setOnClickListener(v -> pickTime(true));
+        etEndTime.setOnClickListener(v -> pickTime(false));
+    }
+
+    private void setupListeners() {
+        btnStartDuty.setOnClickListener(v -> registerDuty());
+        btnEndDuty.setOnClickListener(v -> endDuty());
+
+        cardJunctionStatus.setOnClickListener(v -> {
+            if (isEmergencyActive) {
+                stopAlarmLoop();
+                Toast.makeText(this, "Alarm Silenced.", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        statusRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                Boolean isEmergency = snapshot.child("isEmergency").getValue(Boolean.class);
+                String activeJunction = snapshot.child("junction").getValue(String.class);
+
+                if (isOnDuty) {
+                    txtJunctionTitle.setText("🚨 " + registeredJunction);
+
+                    if (isEmergency != null && isEmergency && activeJunction != null && activeJunction.equals(registeredJunction)) {
+                        isEmergencyActive = true;
+                        cardJunctionStatus.setBackgroundColor(Color.parseColor("#450a0a"));
+                        txtJunctionBadge.setText("● ALERT");
+                        txtJunctionBadge.setTextColor(Color.parseColor("#FCA5A5"));
+                        txtJunctionBadge.setBackgroundColor(Color.parseColor("#7F1D1D"));
+
+                        ambRef.addListenerForSingleValueEvent(new ValueEventListener() {
+                            @Override
+                            public void onDataChange(@NonNull DataSnapshot ambSnapshot) {
+                                if (ambSnapshot.exists() && ambSnapshot.hasChildren()) {
+                                    DataSnapshot firstAmb = ambSnapshot.getChildren().iterator().next();
+                                    String dName = firstAmb.child("driverName").getValue(String.class);
+                                    String dest = firstAmb.child("destination").getValue(String.class);
+                                    txtJunctionDesc.setText("🚨 Ambulance approaching — " + (dName != null ? dName : "Unknown") + " → " + (dest != null ? dest : "Hospital") + "\n(Tap here to silence)");
+                                    txtJunctionDesc.setTextColor(Color.WHITE);
+                                }
+                            }
+                            @Override
+                            public void onCancelled(@NonNull DatabaseError error) {}
+                        });
+
+                        startAlarmLoop();
+                    } else {
+                        isEmergencyActive = false;
+                        stopAlarmLoop();
+                        cardJunctionStatus.setBackgroundResource(R.drawable.card_bg);
+                        txtJunctionBadge.setText("● CLEAR");
+                        txtJunctionBadge.setTextColor(Color.parseColor("#34D399"));
+                        txtJunctionBadge.setBackgroundColor(Color.parseColor("#064E3B"));
+                        txtJunctionDesc.setText("No emergency vehicles approaching your junction.");
+                        txtJunctionDesc.setTextColor(Color.parseColor("#94A3B8"));
+                    }
+                }
+            }
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {}
+        });
+
+        ambRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                layoutAmbulanceList.removeAllViews();
+
+                if (!snapshot.exists()) {
+                    txtActiveCount.setText("0 ACTIVE");
+                    return;
+                }
+
+                LayoutInflater inflater = LayoutInflater.from(PoliceActivity.this);
+
+                statusRef.addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot statusSnap) {
+                        int count = 0;
+                        Boolean globEmerg = statusSnap.child("isEmergency").getValue(Boolean.class);
+                        String globJunc = statusSnap.child("junction").getValue(String.class);
+
+                        for (DataSnapshot amb : snapshot.getChildren()) {
+                            count++;
+                            View cardView = inflater.inflate(R.layout.item_ambulance, layoutAmbulanceList, false);
+
+                            TextView tName = cardView.findViewById(R.id.txtDriverName);
+                            TextView tLat = cardView.findViewById(R.id.txtLat);
+                            TextView tLng = cardView.findViewById(R.id.txtLng);
+                            TextView tHeading = cardView.findViewById(R.id.txtHeading);
+                            TextView tSpeed = cardView.findViewById(R.id.txtSpeed);
+                            TextView tDest = cardView.findViewById(R.id.txtDestination);
+                            TextView tApproach = cardView.findViewById(R.id.txtApproaching);
+
+                            String dName = amb.child("driverName").getValue(String.class);
+                            String dest = amb.child("destination").getValue(String.class);
+                            Double lat = amb.child("lat").getValue(Double.class);
+                            Double lng = amb.child("lng").getValue(Double.class);
+                            Double head = amb.child("heading").getValue(Double.class);
+                            Double spd = amb.child("speed").getValue(Double.class);
+
+                            tName.setText(dName != null ? dName : "Unknown Driver");
+                            tDest.setText("Destination: " + (dest != null ? dest : "N/A"));
+                            tLat.setText("📍 Lat: " + (lat != null ? String.format("%.4f", lat) : "0.0"));
+                            tLng.setText("📍 Lng: " + (lng != null ? String.format("%.4f", lng) : "0.0"));
+                            tHeading.setText("🧭 Heading: " + (head != null ? Math.round(head) : 0) + "°");
+                            tSpeed.setText("⏱️ " + (spd != null ? Math.round(spd) : 0) + " km/h");
+
+                            if (globEmerg != null && globEmerg && globJunc != null) {
+                                tApproach.setVisibility(View.VISIBLE);
+                                tApproach.setText("→ Approaching: " + globJunc);
+                            } else {
+                                tApproach.setVisibility(View.GONE);
+                            }
+
+                            layoutAmbulanceList.addView(cardView);
+                        }
+                        txtActiveCount.setText(count + " ACTIVE");
+                    }
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError error) {}
+                });
+            }
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {}
+        });
+    }
+
+    private void pickTime(boolean isStart) {
+        Calendar c = Calendar.getInstance();
+        new TimePickerDialog(this, (view, hour, min) -> {
+            String time = String.format("%02d:%02d", hour, min);
+            if (isStart) { startTime = time; etStartTime.setText(time); }
+            else { endTime = time; etEndTime.setText(time); }
+        }, c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), true).show();
+    }
+
+    private void registerDuty() {
+        batchNumber = etBatch.getText().toString().trim();
+        officerName = etOfficerName.getText().toString().trim();
+        registeredJunction = spinnerJunction.getSelectedItem().toString();
+
+        if (batchNumber.isEmpty() || officerName.isEmpty() || startTime.equals("--:--") || endTime.equals("--:--")) {
+            Toast.makeText(this, "Fill all details", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("batch", batchNumber);
+        map.put("name", officerName);
+        map.put("junction", registeredJunction);
+        map.put("start", startTime);
+        map.put("end", endTime);
+        policeRef.child(registeredJunction).setValue(map);
+
+        isOnDuty = true;
+        layoutRegistration.setVisibility(View.GONE);
+        layoutDashboard.setVisibility(View.VISIBLE);
+
+        txtMyName.setText(officerName);
+        txtMyBatchJunction.setText("Batch #" + batchNumber + " • " + registeredJunction);
+        txtJunctionTitle.setText("🚨 " + registeredJunction);
+    }
+
+    private void endDuty() {
+        isOnDuty = false;
+        stopAlarmLoop();
+        policeRef.child(registeredJunction).removeValue();
+        layoutDashboard.setVisibility(View.GONE);
+        layoutRegistration.setVisibility(View.VISIBLE);
+    }
+
+    private void startAlarmLoop() {
+        if (mediaPlayer == null) {
+            try {
+                Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+                if (soundUri == null) soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+                mediaPlayer = MediaPlayer.create(this, soundUri);
+                mediaPlayer.setLooping(true);
+                mediaPlayer.start();
+            } catch (Exception e) {}
+        }
+        vibrationHandler.removeCallbacksAndMessages(null);
+        vibrationHandler.post(vibrationRunnable);
+    }
+
+    private void stopAlarmLoop() {
+        vibrationHandler.removeCallbacksAndMessages(null);
+        if (vibrator != null) vibrator.cancel();
+        if (mediaPlayer != null) {
+            if (mediaPlayer.isPlaying()) mediaPlayer.stop();
+            mediaPlayer.release();
+            mediaPlayer = null;
+        }
+    }
+
+    private final Runnable vibrationRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isEmergencyActive) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
+                } else { vibrator.vibrate(500); }
+                vibrationHandler.postDelayed(this, 1000);
+            }
+        }
+    };
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        stopAlarmLoop();
+    }
+
+    private void goBackToMenu() {
+        getSharedPreferences("SirenPrefs", MODE_PRIVATE).edit().clear().apply();
+        startActivity(new Intent(this, LoginActivity.class));
+        finish();
+    }
+
+    @Override
+    public void onBackPressed() {
+        goBackToMenu();
+    }
+}

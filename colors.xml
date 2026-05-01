@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#121212"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🚨 SirenSight"
+        android:textColor="#FFFFFF"
+        android:textSize="40sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="10dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Select your Role to begin"
+        android:textColor="#AAAAAA"
+        android:textSize="16sp"
+        android:layout_marginBottom="50dp"/>
+
+    <Button
+        android:id="@+id/btnPolice"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:text="👮 I am a Police Officer"
+        android:backgroundTint="#D32F2F"
+        android:textSize="18sp"
+        android:layout_marginBottom="20dp"/>
+
+    <Button
+        android:id="@+id/btnCitizen"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:text="🚗 I am a Citizen (Lane A)"
+        android:backgroundTint="#388E3C"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/txtStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Status: Disconnected"
+        android:textColor="#FFC107"
+        android:layout_marginTop="30dp"
+        android:textStyle="italic"/>
+
+</LinearLayout>

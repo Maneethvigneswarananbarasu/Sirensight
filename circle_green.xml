@@ -1,0 +1,223 @@
+package com.example.sirensightmobile;
+
+import android.Manifest;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.View;
+import android.widget.*;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+
+import com.google.android.gms.location.*;
+import com.google.firebase.database.*;
+
+import java.util.HashMap;
+
+public class DriverActivity extends AppCompatActivity {
+
+    private LinearLayout layoutSetup, layoutLive;
+    private Spinner spinnerHospitals;
+    private EditText etDriverName;
+    private Switch switchDemoMode;
+    private TextView txtDemoBadge, txtLat, txtLng, txtHeading, txtSpeed, txtApproaching;
+    private Button btnStartTrip, btnStopTrip, btnNavigate;
+
+    private boolean isRunning = false;
+    private String ambulanceId;
+    private String selectedHospital;
+    private String driverName;
+
+    private FusedLocationProviderClient fusedLocationClient;
+    private LocationCallback locationCallback;
+    private final Handler demoHandler = new Handler(Looper.getMainLooper());
+    private int demoStep = 0;
+
+    // 🔥 DYNAMIC ROUTE: Starts far (500m+), approaches citizen, and passes them!
+    private final double[][] demoRoute = {
+            {13.0080, 80.2395, 20.0, 50.0}, // Start far away
+            {13.0090, 80.2398, 20.0, 50.0},
+            {13.0100, 80.2401, 20.0, 55.0}, // Distance dropping...
+            {13.0110, 80.2404, 20.0, 60.0},
+            {13.0120, 80.2407, 20.0, 60.0}, // 🚨 Enters Danger Zone (Alarm Rings!)
+            {13.0128, 80.2409, 20.0, 60.0}, // Drives directly past Citizen
+            {13.0140, 80.2412, 20.0, 62.0}, // 🟢 Ambulance Passed! (Alarm Auto-Stops!)
+            {13.0150, 80.2415, 20.0, 60.0}, // Driving away...
+            {13.0160, 80.2418, 20.0, 55.0}
+    };
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_driver);
+
+        layoutSetup = findViewById(R.id.layoutSetup);
+        layoutLive = findViewById(R.id.layoutLive);
+        spinnerHospitals = findViewById(R.id.spinnerHospitals);
+        etDriverName = findViewById(R.id.etDriverName);
+        switchDemoMode = findViewById(R.id.switchDemoMode);
+        btnStartTrip = findViewById(R.id.btnStartTrip);
+
+        findViewById(R.id.btnBack).setOnClickListener(v -> goBackToMenu());
+
+        txtDemoBadge = findViewById(R.id.txtDemoBadge);
+        txtLat = findViewById(R.id.txtLat);
+        txtLng = findViewById(R.id.txtLng);
+        txtHeading = findViewById(R.id.txtHeading);
+        txtSpeed = findViewById(R.id.txtSpeed);
+        txtApproaching = findViewById(R.id.txtApproaching);
+        btnStopTrip = findViewById(R.id.btnStopTrip);
+        btnNavigate = findViewById(R.id.btnNavigate);
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+
+        String[] hospitals = {
+                "Sri Ramachandra Hospital",
+                "Apollo Hospital",
+                "Fortis Malar Hospital",
+                "AIIMS"
+        };
+
+        spinnerHospitals.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, hospitals));
+
+        btnStartTrip.setOnClickListener(v -> startEmergency());
+        btnStopTrip.setOnClickListener(v -> stopEmergency());
+        btnNavigate.setOnClickListener(v -> openMaps());
+
+        FirebaseDatabase.getInstance().getReference("Junction_Status")
+                .addValueEventListener(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot snapshot) {
+                        Boolean isEmergency = snapshot.child("isEmergency").getValue(Boolean.class);
+                        String junction = snapshot.child("junction").getValue(String.class);
+
+                        if (isEmergency != null && isEmergency && isRunning) {
+                            txtApproaching.setVisibility(View.VISIBLE);
+                            txtApproaching.setText("⚡ Approaching: " + junction);
+                        } else {
+                            txtApproaching.setVisibility(View.GONE);
+                        }
+                    }
+                    @Override public void onCancelled(@NonNull DatabaseError error) {}
+                });
+    }
+
+    private void startEmergency() {
+        driverName = etDriverName.getText().toString().trim();
+        if(driverName.isEmpty()) driverName = "Driver Maneeth";
+
+        isRunning = true;
+        ambulanceId = "AMB_" + System.currentTimeMillis();
+        selectedHospital = spinnerHospitals.getSelectedItem().toString();
+
+        layoutSetup.setVisibility(View.GONE);
+        layoutLive.setVisibility(View.VISIBLE);
+
+        if (switchDemoMode.isChecked()) {
+            demoStep = 0;
+            demoHandler.post(demoRunnable);
+        } else {
+            startRealGps();
+        }
+    }
+
+    private void stopEmergency() {
+        isRunning = false;
+        demoHandler.removeCallbacks(demoRunnable);
+        if (locationCallback != null) {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
+        }
+
+        FirebaseDatabase.getInstance().getReference("Active_Ambulance").child(ambulanceId).removeValue();
+
+        layoutLive.setVisibility(View.GONE);
+        layoutSetup.setVisibility(View.VISIBLE);
+    }
+
+    private void openMaps() {
+        Uri uri = Uri.parse("google.navigation:q=" + selectedHospital);
+        startActivity(new Intent(Intent.ACTION_VIEW, uri));
+    }
+
+    private final Runnable demoRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isRunning) return;
+
+            if (demoStep >= demoRoute.length) demoStep = 0;
+
+            updateFirebaseAndUI(
+                    demoRoute[demoStep][0],
+                    demoRoute[demoStep][1],
+                    (float) demoRoute[demoStep][2],
+                    (float) demoRoute[demoStep][3]
+            );
+
+            demoStep++;
+            demoHandler.postDelayed(this, 3000);
+        }
+    };
+
+    private void startRealGps() {
+        LocationRequest req = LocationRequest.create().setInterval(3000).setPriority(Priority.PRIORITY_HIGH_ACCURACY);
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            locationCallback = new LocationCallback() {
+                @Override
+                public void onLocationResult(LocationResult res) {
+                    if (res == null || !isRunning) return;
+                    updateFirebaseAndUI(
+                            res.getLastLocation().getLatitude(),
+                            res.getLastLocation().getLongitude(),
+                            res.getLastLocation().getBearing(),
+                            res.getLastLocation().getSpeed() * 3.6f
+                    );
+                }
+            };
+            fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper());
+        }
+    }
+
+    private void updateFirebaseAndUI(double lat, double lng, float heading, float speed) {
+        txtLat.setText(String.format("%.6f", lat));
+        txtLng.setText(String.format("%.6f", lng));
+        txtHeading.setText(Math.round(heading) + "°");
+        txtSpeed.setText(Math.round(speed) + " km/h");
+
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("isEmergency", true);
+        map.put("driverName", driverName);
+        map.put("destination", selectedHospital);
+        map.put("lat", lat);
+        map.put("lng", lng);
+        map.put("heading", heading);
+        map.put("speed", speed);
+        map.put("timestamp", System.currentTimeMillis());
+
+        if(selectedHospital.equals("Sri Ramachandra Hospital")) {
+            map.put("destLat", 13.0381); map.put("destLng", 80.1410);
+        } else if(selectedHospital.equals("Apollo Hospital")) {
+            map.put("destLat", 13.0633); map.put("destLng", 80.2518);
+        } else {
+            map.put("destLat", 13.0067); map.put("destLng", 80.2206);
+        }
+
+        FirebaseDatabase.getInstance().getReference("Active_Ambulance").child(ambulanceId).setValue(map);
+    }
+
+    private void goBackToMenu() {
+        getSharedPreferences("SirenPrefs", MODE_PRIVATE).edit().clear().apply();
+        startActivity(new Intent(this, LoginActivity.class));
+    }
+
+    @Override
+    public void onBackPressed() {
+        goBackToMenu();
+    }
+}

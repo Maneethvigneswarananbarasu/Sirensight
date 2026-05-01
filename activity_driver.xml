@@ -1,0 +1,94 @@
+package com.example.sirensightmobile;
+
+import android.graphics.Color;
+import android.os.Bundle;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.firebase.database.*;
+
+public class PoliceDashboardActivity extends AppCompatActivity {
+
+    private TextView txtInfo;
+    private DatabaseReference ambRef, statusRef;
+
+    private String junctionStatus = "🟢 CITY STATUS: NORMAL\nAll junctions clear.";
+    private String fleetStatus = "No active emergency vehicles.";
+    private int dashboardColor = Color.parseColor("#22C55E"); // Safe Green
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_police_dashboard);
+
+        txtInfo = findViewById(R.id.txtInfo);
+
+        ambRef = FirebaseDatabase.getInstance().getReference("Active_Ambulance");
+        statusRef = FirebaseDatabase.getInstance().getReference("Junction_Status");
+
+        statusRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                Boolean isEmergency = snapshot.child("isEmergency").getValue(Boolean.class);
+                String junction = snapshot.child("junction").getValue(String.class);
+
+                if (isEmergency != null && isEmergency && junction != null) {
+                    junctionStatus = "🔴 CRITICAL ALERT!\nAmbulance approaching:\n📍 " + junction;
+                    dashboardColor = Color.RED;
+                } else {
+                    junctionStatus = "🟢 CITY STATUS: NORMAL\nAll junctions clear.";
+                    dashboardColor = Color.parseColor("#22C55E");
+                }
+                updateDashboardUI();
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {}
+        });
+
+        ambRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (!snapshot.exists() || !snapshot.hasChildren()) {
+                    fleetStatus = "No active emergency vehicles.";
+                } else {
+                    StringBuilder sb = new StringBuilder();
+                    int count = 1;
+                    for (DataSnapshot amb : snapshot.getChildren()) {
+                        Double lat = amb.child("lat").getValue(Double.class);
+                        Double lng = amb.child("lng").getValue(Double.class);
+
+                        String latStr = lat != null ? String.format("%.4f", lat) : "N/A";
+                        String lngStr = lng != null ? String.format("%.4f", lng) : "N/A";
+
+                        String ambId = amb.getKey();
+                        if (ambId != null && ambId.length() > 10) {
+                            ambId = ambId.substring(0, 10) + "...";
+                        }
+
+                        sb.append(count).append(". 🚑 ID: ").append(ambId).append("\n");
+                        sb.append("   Lat: ").append(latStr).append(" | Lng: ").append(lngStr).append("\n\n");
+                        count++;
+                    }
+                    fleetStatus = sb.toString();
+                }
+                updateDashboardUI();
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {}
+        });
+    }
+
+    private void updateDashboardUI() {
+        String finalUI = "🏢 CENTRAL COMMAND\n" +
+                "========================\n\n" +
+                junctionStatus + "\n\n\n" +
+                "📡 LIVE FLEET TRACKING\n" +
+                "========================\n\n" +
+                fleetStatus;
+
+        txtInfo.setTextColor(dashboardColor);
+        txtInfo.setText(finalUI);
+    }
+}

@@ -1,0 +1,83 @@
+package com.example.sirensightmobile;
+
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+import android.media.RingtoneManager;
+import android.net.Uri;
+import android.os.Build;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.util.Log;
+
+import androidx.annotation.NonNull;
+import androidx.core.app.NotificationCompat;
+
+import com.google.firebase.messaging.FirebaseMessagingService;
+import com.google.firebase.messaging.RemoteMessage;
+
+import java.util.Map;
+
+public class MyFirebaseMessagingService extends FirebaseMessagingService {
+
+    private static final String TAG = "SirenSight_FCM";
+    private static final String CHANNEL_ID = "emergency_alerts";
+
+    @Override
+    public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
+        super.onMessageReceived(remoteMessage);
+
+        Log.d(TAG, "🔥 Firebase Message Received!");
+
+        if (remoteMessage.getData().size() > 0) {
+            Map<String, String> data = remoteMessage.getData();
+
+            String title = data.get("title");
+            String body = data.get("body");
+            String lat = data.get("lat");
+            String lng = data.get("lng");
+
+            // We trigger the notification immediately for testing
+            // We can add distance filtering back here later
+            triggerAlert(title, body, lat, lng);
+        }
+    }
+
+    private void triggerAlert(String title, String body, String lat, String lng) {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Emergency", NotificationManager.IMPORTANCE_HIGH);
+            nm.createNotificationChannel(channel);
+        }
+
+        // Open Google Maps on Click
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + lat + "," + lng));
+        PendingIntent pi = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(title != null ? title : "AMBULANCE NEARBY")
+                .setContentText(body != null ? body : "Please clear the road immediately!")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setFullScreenIntent(pi, true)
+                .setAutoCancel(true)
+                .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                .setContentIntent(pi);
+
+        nm.notify((int) System.currentTimeMillis(), builder.build());
+
+        // Strong Vibration
+        Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (v != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                v.vibrate(VibrationEffect.createOneShot(1500, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                v.vibrate(1500);
+            }
+        }
+    }
+}

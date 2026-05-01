@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SirenSight | Hospital Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: white; padding: 40px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        #junction-box { padding: 50px; border-radius: 20px; text-align: center; border: 4px solid #333; }
+        .clear { background: #1b5e20; }
+        .emergency { background: #b71c1c; animation: pulse 1s infinite; }
+        .card { background: #444; margin: 10px 0; padding: 15px; border-radius: 10px; display: flex; justify-content: space-between; }
+        .btn { background: #2196F3; color: white; border: none; padding: 5px 15px; cursor: pointer; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.02); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <h1>🚑 SirenSight Hospital Portal</h1>
+    <div class="grid">
+        <div id="junction-box" class="clear"><h2 id="status-text">JUNCTION CLEAR</h2></div>
+        <div><h2>📨 Incoming Requests</h2><div id="requests"></div></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+        import { getDatabase, ref, onValue, remove } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBfm3LLY0OVIR6eHqKcvJ72U3-PvArKu4I",
+            authDomain: "sirensight-9a4e8.firebaseapp.com",
+            databaseURL: "https://sirensight-9a4e8-default-rtdb.firebaseio.com/",
+            projectId: "sirensight-9a4e8",
+            appId: "1:467907424525:web:79eaf4fd1bd1f07e1d80444"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        onValue(ref(db, 'Junction_Status'), (snapshot) => {
+            const data = snapshot.val();
+            const box = document.getElementById('junction-box');
+            if (data && data.isEmergency) {
+                document.getElementById('status-text').innerText = "🚨 EMERGENCY INBOUND!";
+                box.className = "emergency";
+            } else {
+                document.getElementById('status-text').innerText = "JUNCTION CLEAR";
+                box.className = "clear";
+            }
+        });
+
+        onValue(ref(db, 'Hospital_Trips'), (snapshot) => {
+            const div = document.getElementById('requests');
+            div.innerHTML = "";
+            snapshot.forEach((child) => {
+                const trip = child.val();
+                div.innerHTML += `<div class="card">
+                    <div><h3>To: ${trip.hospital}</h3><p>ETA: ${trip.eta}</p></div>
+                    <button class="btn" onclick="accept('${child.key}')">ACCEPT</button>
+                </div>`;
+            });
+        });
+
+        window.accept = function(key) {
+            remove(ref(db, 'Hospital_Trips/' + key));
+            alert("Patient Accepted!");
+        }
+    </script>
+</body>
+</html>

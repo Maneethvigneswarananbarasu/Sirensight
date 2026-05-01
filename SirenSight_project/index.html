@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SirenSight | Live Command Center</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 0; display: flex; height: 100vh; background-color: #0B0F19; color: white; }
+        #map { width: 75%; height: 100%; }
+        #panel { width: 25%; background: #0F172A; padding: 24px; border-left: 2px solid #1E293B; display: flex; flex-direction: column; }
+        h2 { margin-top: 0; font-size: 24px; border-bottom: 2px solid #1E293B; padding-bottom: 12px; }
+        .amb-info { background: #1E3A8A; padding: 16px; border-radius: 8px; margin-bottom: 24px; border: 1px solid #3B82F6; }
+        .amb-info strong { font-size: 16px; color: white; }
+        .amb-info span { display: block; font-size: 14px; margin-top: 8px; color: #93C5FD; line-height: 1.5; }
+        #userStatus { background: #1E293B; padding: 20px; border-radius: 8px; text-align: center; border: 2px solid transparent; transition: all 0.3s ease; }
+        #userStatus.danger { background: #3F1212; border-color: #EF4444; }
+        #userStatus.moved { background: #064E3B; border-color: #34D399; }
+        #userTitle { font-size: 14px; color: #94A3B8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        #userValue { font-size: 28px; font-weight: bold; margin: 10px 0; }
+        #userAction { font-size: 13px; color: #94A3B8; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h2>🚨 Command Center</h2>
+        
+        <div class="amb-info" id="ambCard">
+            <strong>🚑 Fleet Status</strong>
+            <span id="ambDest">Idle<br>Waiting for App Signal...</span>
+        </div>
+        
+        <h3 style="font-size: 16px; color: #94A3B8; margin-top: 10px;">📍 Citizen Monitoring</h3>
+        
+        <div id="userStatus">
+            <div id="userTitle">Commuter (USER-101)</div>
+            <div id="userValue">🟢 SAFE</div>
+            <div id="userAction">Monitoring phone status...</div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+        const app = initializeApp({
+            apiKey: "AIzaSyBfm3LLy0OVIR6eHqKcvJ72U3-PvarKu4I",
+            authDomain: "sirensight-9a4e8.firebaseapp.com",
+            databaseURL: "https://sirensight-9a4e8-default-rtdb.firebaseio.com",
+            projectId: "sirensight-9a4e8"
+        });
+        const db = getDatabase(app);
+        
+        const map = L.map('map').setView([13.0128, 80.2409], 16);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        let ambMarker, citMarker, routeLine;
+
+        onValue(ref(db, "users/USER-101"), snap => {
+            let user = snap.val();
+            if (!user) return;
+            
+            let color = user.hasMoved ? "#10B981" : (user.alert_state ? "#EF4444" : "#3B82F6");
+            
+            if (!citMarker) {
+                citMarker = L.circleMarker([user.lat, user.lng], {radius: 10, weight: 2}).addTo(map);
+                citMarker.bindPopup("<b>Citizen (Your Phone)</b>").openPopup();
+            }
+            citMarker.setLatLng([user.lat, user.lng]).setStyle({color: color, fillColor: color, fillOpacity: 0.8});
+            
+            let card = document.getElementById("userStatus");
+            let val = document.getElementById("userValue");
+            let act = document.getElementById("userAction");
+
+            if (user.hasMoved) { 
+                card.className = "moved"; val.innerHTML = "🛡️ MOVED LEFT"; val.style.color = "#34D399"; act.innerText = "Citizen cleared the road via App."; 
+            } else if (user.alert_state) { 
+                card.className = "danger"; val.innerHTML = "🚨 DANGER!"; val.style.color = "#EF4444"; act.innerText = "Alarm ringing on physical phone!"; 
+            } else { 
+                card.className = ""; val.innerHTML = "🟢 SAFE"; val.style.color = "#10B981"; act.innerText = "Way is clear. Monitoring..."; 
+            }
+        });
+
+        onValue(ref(db, "Active_Ambulance"), async snap => {
+            let data = snap.val();
+            
+            if (!data) {
+                document.getElementById("ambDest").innerHTML = "Idle<br>Waiting for App Signal...";
+                if (ambMarker) map.removeLayer(ambMarker);
+                if (routeLine) map.removeLayer(routeLine);
+                ambMarker = null; routeLine = null;
+                return;
+            }
+            
+            let keys = Object.keys(data);
+            let ambId = keys[keys.length - 1]; 
+            let amb = data[ambId];
+            
+            if (!amb.lat) return; 
+            
+            document.getElementById("ambDest").innerHTML = 
+                `Driver: <b>${amb.driverName}</b><br>` + 
+                `Target: <b>${amb.destination}</b><br>` + 
+                `Speed: <b style="color:#34D399">${Math.round(amb.speed)} km/h</b>`;
+            
+            if (!ambMarker) { ambMarker = L.marker([amb.lat, amb.lng]).addTo(map); }
+            ambMarker.setLatLng([amb.lat, amb.lng]);
+
+            if (!routeLine && amb.destLat) {
+                try {
+                    let r = await fetch(`https://router.project-osrm.org/route/v1/driving/${amb.lng},${amb.lat};${amb.destLng},${amb.destLat}?overview=full&geometries=geojson`);
+                    let routeData = await r.json();
+                    let coords = routeData.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                    routeLine = L.polyline(coords, {color: '#3B82F6', weight: 6, opacity: 0.8}).addTo(map);
+                } catch (e) { console.log(e); }
+            }
+        });
+    </script>
+</body>
+</html>
